@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Intended to be run from Jamf, but can run locally
+# Downloads and installs the latest ZoomITInstaller and dynamically writes a config profile
+# Only downloads if the version on disk is more than 2 days from the release date in the RSS feed.
+
 ## JAMF default parameters
 # $1 -	Mount Point of target Drive
 # $2 -	Computer Name
@@ -7,7 +11,6 @@
 pathToPackage=$1
 targetLocation=$2
 targetVolume=$3
-
 
 ####################################################################
 ### Specify the name and location of the vendor's installer file here ###
@@ -24,18 +27,18 @@ orgLoginURL="https://orgName.zoom.us"
 
 if [ -e "$AppLocation" ] ;
     then
-    # check released version and creation date of application on disk to determine if we should continue.
+    # Check released version and creation date of application on disk to determine if we should continue.
 
-# sed is removing tags, and removing all whitespace
+    # sed is removing tags, and removing all whitespace
     latestReleaseDate=$(/usr/bin/curl $vendorUpdateURL | grep version -A1 | grep pubDate | sed -e 's/<pubDate>//' -e 's/<\/pubDate>//' -e 's/,//' -e 's/^ *//g')
 
 
     if [ ! -z "$latestReleaseDate" ]; then
-        #if we have a release date we can compare to the version on disk to see if we need an update
-        #convert release date to easier to read format
+        # If we have a release date we can compare to the version on disk to see if we need an update
+        # Convert release date to easier to read format
         latestReleaseDateEpochTime=$(/bin/date -j -u -f "%a %d %b %Y %T %z" "$latestReleaseDate" "+%s")
 
-        #get creation date of application (we don't care about time)
+        # Get creation date of application (we don't care about time)
         diskAppCreationDate=$(/usr/bin/stat -t "%b%d%Y" /Applications/zoom.us.app/Contents/Resources/Zoom-Info.plist | awk '{print $9}' | sed 's/\"//g') 
         
         diskAppCreationDateEpochTime=$(/bin/date -j -u -f "%b%d%Y" "$diskAppCreationDate" "+%s")
@@ -47,14 +50,14 @@ if [ -e "$AppLocation" ] ;
             echo "date on disk within two days of release, skipping"
             exit 0;
         else
-            #need to update
+            # Need to update
             echo "version out of date"
         fi
 
     else
         echo "no recent releases of this product, skipping"
         exit 0;
-        #stop here, nothing to do
+        # Stop here, nothing to do
 else
     echo "no app installed, proceeding"
 fi 
@@ -93,7 +96,7 @@ fi
 # if installer requires a plist or choice changes file, retrieve or create it here
 ####################################################
 
-# create config plist in install folder
+# Create config plist in install folder
 
 /usr/libexec/PlistBuddy -c "Add :nogoogle bool true" "$configFileLocation$configFile"
 /usr/libexec/PlistBuddy -c "Add :nofacebook bool true" "$configFileLocation$configFile"
@@ -106,11 +109,11 @@ fi
 # Run Installer
 ####################################################
 
-# install with pre-configured settings 
+# Install with pre-configured settings 
 # https://support.zoom.us/hc/en-us/articles/115001799006-Mass-deploying-with-preconfigured-settings-for-macOS
 installer -pkg /tmp/jamf/Zoom/ZoomInstallerIT.pkg -target /
 
-# remove install files
+# Remove install files
 rm -rf /tmp/jamf/Zoom
 
 echo "Finished! Check status messages above"
