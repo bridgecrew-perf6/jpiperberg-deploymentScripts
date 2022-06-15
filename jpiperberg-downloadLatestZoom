@@ -1,0 +1,118 @@
+#!/bin/bash
+
+## JAMF default parameters
+# $1 -	Mount Point of target Drive
+# $2 -	Computer Name
+# $3 -	Username of account triggering the policy
+pathToPackage=$1
+targetLocation=$2
+targetVolume=$3
+
+
+####################################################################
+### Specify the name and location of the vendor's installer file here ###
+####################################################################
+
+AppName="Zoom"
+AppLocation="/Applications/zoom.us.app"
+downloadURL="https://zoom.us/client/latest/ZoomInstallerIT.pkg"
+Installer="/tmp/jamf/Zoom/ZoomInstallerIT.pkg"
+configFile="us.zoom.config.plist"
+configFileLocation="/tmp/jamf/Zoom/"
+vendorUpdateURL="https://status.zoom.us/history.rss"
+orgLoginURL="https://orgName.zoom.us"
+
+if [ -e "$AppLocation" ] ;
+    then
+    # check released version and creation date of application on disk to determine if we should continue.
+
+# sed is removing tags, and removing all whitespace
+    latestReleaseDate=$(/usr/bin/curl $vendorUpdateURL | grep version -A1 | grep pubDate | sed -e 's/<pubDate>//' -e 's/<\/pubDate>//' -e 's/,//' -e 's/^ *//g')
+
+
+    if [ ! -z "$latestReleaseDate" ]; then
+        #if we have a release date we can compare to the version on disk to see if we need an update
+        #convert release date to easier to read format
+        latestReleaseDateEpochTime=$(/bin/date -j -u -f "%a %d %b %Y %T %z" "$latestReleaseDate" "+%s")
+
+        #get creation date of application (we don't care about time)
+        diskAppCreationDate=$(/usr/bin/stat -t "%b%d%Y" /Applications/zoom.us.app/Contents/Resources/Zoom-Info.plist | awk '{print $9}' | sed 's/\"//g') 
+        
+        diskAppCreationDateEpochTime=$(/bin/date -j -u -f "%b%d%Y" "$diskAppCreationDate" "+%s")
+
+        twoDaysAhead=$(($latestReleaseDateEpochTime + 172800))
+        twoDaysBehind=$(($latestReleaseDateEpochTime - 172800))
+
+        if [ $diskAppCreationDateEpochTime -le $twoDaysAhead ] && [ $diskAppCreationDateEpochTime -ge $twoDaysBehind ]; then
+            echo "date on disk within two days of release, skipping"
+            exit 0;
+        else
+            #need to update
+            echo "version out of date"
+        fi
+
+    else
+        echo "no recent releases of this product, skipping"
+        exit 0;
+        #stop here, nothing to do
+else
+    echo "no app installed, proceeding"
+fi 
+
+# Download Application
+/usr/bin/curl -L $downloadURL -o "$Installer" --create-dirs
+
+
+###################################################
+# If present, Remove the earlier copies of the Application from /Applications
+# Start a running count of old apps we find
+###################################################
+OldCopy=0
+
+
+# Look for current name copy of Application
+if [ -e "$AppLocation" ]
+    then 
+        let "OldCopy=OldCopy+1"
+        echo "Removing original App"
+        sudo rm -Rf "$AppLocation"
+        sleep 3
+fi
+
+# Report what was found when looking for older copies
+if [ Oldcopy != 0 ]
+    then
+        # Report older name versions found
+        echo "Found $OldCopy Older .app copies"
+    else
+        # Report no older copies found
+        echo "No older named .apps found"
+fi
+
+####################################################
+# if installer requires a plist or choice changes file, retrieve or create it here
+####################################################
+
+# create config plist in install folder
+
+/usr/libexec/PlistBuddy -c "Add :nogoogle bool true" "$configFileLocation$configFile"
+/usr/libexec/PlistBuddy -c "Add :nofacebook bool true" "$configFileLocation$configFile"
+/usr/libexec/PlistBuddy -c "Add :setwebdomain string $orgLoginURL" "$configFileLocation$configFile"
+/usr/libexec/PlistBuddy -c "Add :ZAutoSSOLogin bool true" "$configFileLocation$configFile"
+/usr/libexec/PlistBuddy -c "Add :ZSSOHost string orgName.zoom.us" "$configFileLocation$configFile"
+/usr/libexec/PlistBuddy -c "Add :ZRemoteControlAllApp bool true" "$configFileLocation$configFile"
+
+####################################################
+# Run Installer
+####################################################
+
+# install with pre-configured settings 
+# https://support.zoom.us/hc/en-us/articles/115001799006-Mass-deploying-with-preconfigured-settings-for-macOS
+installer -pkg /tmp/jamf/Zoom/ZoomInstallerIT.pkg -target /
+
+# remove install files
+rm -rf /tmp/jamf/Zoom
+
+echo "Finished! Check status messages above"
+
+exit 0      ## Success
