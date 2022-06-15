@@ -21,19 +21,18 @@ fi
 if [[ -e $donePath ]]; then
 	rm $donePath
 fi
-# first, keep this from going to sleep.  12 hours should be sufficient, I hope!
 
+# First, keep this from going to sleep.  12 hours should be sufficient, I hope!
 caffeinate -i -m -t 43200 &
 
-#begin log (clearing previous log)
+# Begin log (clearing previous log)
 echo "Beginning Installation..." > $LPATH
 echo $(date "+%Y-%m-%d %H:%M:%S: ") >> $LPATH
 
-#pass arguments SoftwareName SoftwarePath returns 0 if installed, 1 if installation needed and logs results.
+# Pass arguments SoftwareName SoftwarePath returns 0 if installed, 1 if installation needed and logs results.
 function checkInstallStatus () {
     echo "Checking for" $1 >> $LPATH
     echo $(date "+%Y-%m-%d %H:%M:%S: ") >> $LPATH
-
     if [[ -e  $2 ]]; then
         echo "$1 already present!" >> $LPATH
         return 0
@@ -43,14 +42,12 @@ function checkInstallStatus () {
     fi 
 }
 
-#pass arguments SoftwareName Policy ID delaySeconds will log installation and trigger policy
+# Pass arguments SoftwareName Policy ID delaySeconds will log installation and trigger policy
 function installApp () {
     echo "installing " $1 >> $LPATH
-    # longer randomDelaySeconds for larger packages
+    # Longer randomDelaySeconds for larger packages
     /usr/local/bin/jamf/ policy -id $2 -randomDelaySeconds $3 -v >> $LPATH
 }
-
-#detect architecture type:
 
 function detectArchType () {
     if [ "${arch_type}" = "x86_64" ]; then
@@ -85,7 +82,7 @@ function errorLog () {
     echo "If this is not the first time you have seen this error on this computer, please contact your supervisor and send them the eqdesklog.txt file on the desktop\n" >> $errorPath
 }
 
-#Set Time Zone and Language
+# Set Time Zone and Language
 systemsetup -settimezone America/New_York
 systemsetup -setnetworktimeserver time.apple.com
 systemsetup -setusingnetworktime on
@@ -100,7 +97,7 @@ if [[ "$arch_type" == "AS" ]]; then
     installApp "Rosetta" <policyiD> 10
 fi
 
-#take last alphabetical app as the whole thing
+# take last alphabetical app as the whole thing
 checkInstallStatus "Supporting Apps" "$pathToHelperApps/UpgradeEQDeskApps-universal.app"
 if [[ $? != 0 ]]; then
     echo "Supporting Apps not present" >> $LPATH
@@ -151,7 +148,6 @@ if [[ $? != 0 ]]; then
 fi
 
 # now here come the big'uns
-
 # we take Word as proxy for the whole suite
 checkInstallStatus "MS Office" "/Applications/Microsoft Word.app"
 if [[ $? != 0 ]]; then
@@ -185,8 +181,11 @@ if [[ $? != 0 ]]; then
     fi
 fi
 
+# If the OS is currently Big Sur, keep it on Big Sur.  
+# If Monterey, check if machine is capable of Erase all content and settings (T2 or Apple Silicon) 
+# If it can, skip downloading the 12 GB OS.
 if [ $os_major -le 11 ]; then
-    #take second segment of DMG as the whole thing
+    # Take second segment of DMG as the whole thing
     checkInstallStatus "OSInstaller" "$pathToHelperApps/Install_11.6Segment.002.dmgpart"
     if [[ $? != 0 ]]; then
         echo "OS Installer not present" >> $LPATH
@@ -196,7 +195,6 @@ if [ $os_major -le 11 ]; then
             errorLog "OS Installer"
         fi
     fi
-
 else
     # Running Monterey or higher, check to see if Erase all Content and Settings is available before downloading OS
     if [[ "$arch_type" == "Intel" ]]; then
