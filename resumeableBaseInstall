@@ -1,0 +1,232 @@
+#!/bin/sh
+
+# credit to George Casper for the initial idea of skipping the install
+# if application was already present
+
+LPATH='/Users/Shared/Install_log.txt' 
+arch_type="$(uname -m)"
+errorPath='/Users/Shared/INSTALLATION_FAILED.txt'
+donePath='/Users/Shared/Done_Deploying_Software'
+os_major=$(sysctl -n kern.osproductversion | awk 'BEGIN {FS="."}; {print $1}')
+hasT2=$(/usr/sbin/system_profiler SPiBridgeDataType | grep T2)
+pathToHelperApps="<path>"
+
+# if previous log files exist, delete them.
+if [[ -e $errorPath ]]; then
+	rm $errorPath
+fi
+if [[ -e $LPATH ]]; then
+	rm $LPATH
+fi
+if [[ -e $donePath ]]; then
+	rm $donePath
+fi
+# first, keep this from going to sleep.  12 hours should be sufficient, I hope!
+
+caffeinate -i -m -t 43200 &
+
+#begin log (clearing previous log)
+echo "Beginning Installation..." > $LPATH
+echo $(date "+%Y-%m-%d %H:%M:%S: ") >> $LPATH
+
+#pass arguments SoftwareName SoftwarePath returns 0 if installed, 1 if installation needed and logs results.
+function checkInstallStatus () {
+    echo "Checking for" $1 >> $LPATH
+    echo $(date "+%Y-%m-%d %H:%M:%S: ") >> $LPATH
+
+    if [[ -e  $2 ]]; then
+        echo "$1 already present!" >> $LPATH
+        return 0
+    else
+        echo "$1 not detected at $2" >> $LPATH
+        return 1
+    fi 
+}
+
+#pass arguments SoftwareName Policy ID delaySeconds will log installation and trigger policy
+function installApp () {
+    echo "installing " $1 >> $LPATH
+    # longer randomDelaySeconds for larger packages
+    /usr/local/bin/jamf/ policy -id $2 -randomDelaySeconds $3 -v >> $LPATH
+}
+
+#detect architecture type:
+
+function detectArchType () {
+    if [ "${arch_type}" = "x86_64" ]; then
+        if [ "$(sysctl -in sysctl.proc_translated)" = "1" ]; then
+            echo "Running on Rosetta 2" >> $LPATH
+            arch_type="AS"
+        else
+            echo "Running on native Intel" >> $LPATH
+            arch_type="Intel"
+        fi 
+    elif [ "${arch_type}" = "arm64" ]; then
+        echo "Running on ARM" >> $LPATH
+        arch_type="AS"
+    else
+        echo "Unknown architecture: ${arch_type}" >> $LPATH
+        arch_type="unknown"
+    fi
+    echo "Architecture type is" $arch_type >> $LPATH
+}
+
+function errorLog () {
+    if [ ! -e $errorPath ]; then
+        touch $errorPath
+        echo "Please re-run installation script by following these instructions:\n" >> $errorPath
+        echo "Please make sure the network cable and adapter are connected securely at both ends" >> $errorPath
+        echo "Make sure you can access a webpage to confirm\n" >> $errorPath
+        echo "Go to the Finder Go menu, select 'go to folder' and type '<pathToHelperApps'" >> $errorPath
+        echo "Run the Application titled 'Unstick Imaging'" >> $errorPath
+        echo "If the application is not present, run the script from one of the Equipment Desk external drives\n" >> $errorPath
+    fi
+    echo "Error installing $1\n" >> $errorPath
+    echo "If this is not the first time you have seen this error on this computer, please contact your supervisor and send them the eqdesklog.txt file on the desktop\n" >> $errorPath
+}
+
+#Set Time Zone and Language
+systemsetup -settimezone America/New_York
+systemsetup -setnetworktimeserver time.apple.com
+systemsetup -setusingnetworktime on
+languagesetup -langspec "en"
+
+# now we want to iterate through our packages in a hopefully sensible order, larger ones later
+# make note in log, check for existence of package, skipping install if it is found
+# this is to allow resume if deployment is interrupted
+# (loss of network connection or shutting down because the desk is closing is common)
+detectArchType
+if [[ "$arch_type" == "AS" ]]; then
+    installApp "Rosetta" <policyiD> 10
+fi
+
+#take last alphabetical app as the whole thing
+checkInstallStatus "Supporting Apps" "$pathToHelperApps/UpgradeEQDeskApps-universal.app"
+if [[ $? != 0 ]]; then
+    echo "Supporting Apps not present" >> $LPATH
+    installApp "Supporting Apps" <policyiD> 10
+    checkInstallStatus "Supporting Apps" "$pathToHelperApps/UpgradeEQDeskApps-universal.app"
+    if [[ $? != 0 ]]; then
+        errorLog "Supporting Apps"
+    fi
+fi
+
+checkInstallStatus "VLC" "/Applications/VLC.app"
+if [[ $? != 0 ]]; then
+    echo "VLC not present" >> $LPATH
+    installApp "VLC" <policyiD> 10
+    checkInstallStatus "VLC" "/Applications/VLC.app"
+    if [[ $? != 0 ]]; then
+        errorLog "VLC"
+    fi
+fi
+
+checkInstallStatus "Firefox" "/Applications/Firefox.app"
+if [[ $? != 0 ]]; then
+    echo "Firefox not present" >> $LPATH
+    installApp "Firefox" <policyiD> 10
+    checkInstallStatus "Firefox" "/Applications/Firefox.app"
+    if [[ $? != 0 ]]; then
+        errorLog "Firefox"
+    fi
+fi
+
+checkInstallStatus "Chrome" "/Applications/Google Chrome.app"
+if [[ $? != 0 ]]; then
+    echo "Chrome not present" >> $LPATH
+    installApp "Chrome" <policyiD> 10
+    checkInstallStatus "Chrome" "/Applications/Google Chrome.app"
+    [[ $? != 0 ]]; then
+        errorLog "Chrome"
+    fi
+fi
+
+checkInstallStatus "Zoom" "/Applications/zoom.us.app"
+if [[ $? != 0 ]]; then
+    echo "Zoom not present" >> $LPATH
+    installApp "Zoom" <policyiD> 10
+    if [[ $? != 0 ]]; then
+        errorLog "Zoom"
+    fi
+fi
+
+# now here come the big'uns
+
+# we take Word as proxy for the whole suite
+checkInstallStatus "MS Office" "/Applications/Microsoft Word.app"
+if [[ $? != 0 ]]; then
+    echo "MS Office not present" >> $LPATH
+    installApp "MS Office" <policyID> 60
+    installApp "MS Office Serializer" 1778 60
+    defaults write /Library/Preferences/com.microsoft.autoupdate2 AcknowledgedDataCollectionPolicy RequiredDataOnly
+    defaults write /Library/Preferences/com.microsoft.Word kSubUIAppCompletedFirstRunSetup1507 -bool true
+    defaults write /Library/Preferences/com.microsoft.Excel kSubUIAppCompletedFirstRunSetup1507 -bool true
+    defaults write /Library/Preferences/com.microsoft.PowerPoint kSubUIAppCompletedFirstRunSetup1507 -bool true
+    defaults write /Library/Preferences/com.microsoft.OneNote kSubUIAppCompletedFirstRunSetup1507 -bool true
+    defaults write /Library/Preferences/com.microsoft.Outlook kSubUIAppCompletedFirstRunSetup1507 -bool true
+    checkInstallStatus "MS Office" "/Applications/Microsoft Word.app"
+    if [[ $? != 0 ]]; then
+        errorLog "Microsoft Office not present"
+    fi
+fi
+
+# we take Photoshop as proxy for big5 Suite, install shared device apps based on Architecture type
+checkInstallStatus "Adobe Suite (PS,Br,Il,ID,Ac,Ic)" "/Applications/Adobe Photoshop 2022/Adobe Photoshop 2022.app"
+if [[ $? != 0 ]]; then
+    echo "Adobe Suite (PS,Br,Il,ID,PP,PR) not present" >> $LPATH
+    if [[ "$arch_type" == "AS" ]]; then
+        installApp "Adobe Suite (PS,Br,Il,ID,Ac,Ic)" <policyiD> 60
+    else 
+        installApp "Adobe Suite (PS,Br,Il,ID,Ac,Ic)" <policyiD> 60
+    fi
+    checkInstallStatus "Adobe Suite (PS,Br,Il,ID,Ac,Ic)" "/Applications/Adobe Photoshop 2021/Adobe Photoshop 2022.app"
+    if [[ $? != 0 ]]; then
+        errorLog "Adobe Big 5 not Present"
+    fi
+fi
+
+if [ $os_major -le 11 ]; then
+    #take second segment of DMG as the whole thing
+    checkInstallStatus "OSInstaller" "$pathToHelperApps/Install_11.6Segment.002.dmgpart"
+    if [[ $? != 0 ]]; then
+        echo "OS Installer not present" >> $LPATH
+        installApp "OS Installer" <policyiD> 60
+        checkInstallStatus "OSInstaller" "$pathToHelperApps/Install_11.6Segment.002.dmgpart"
+        if [[ $? != 0 ]]; then
+            errorLog "OS Installer"
+        fi
+    fi
+
+else
+    # Running Monterey or higher, check to see if Erase all Content and Settings is available before downloading OS
+    if [[ "$arch_type" == "Intel" ]]; then
+        if [[ "$hasT2" == "" ]]; then
+            checkInstallStatus "OSInstaller" "$pathToHelperApps/Install_12Segment.002.dmgpart"
+            if [[ $? != 0 ]]; then
+                echo "OS Installer not present" >> $LPATH
+                # download macOS 12 installer
+                installApp "OS Installer" <policyID> 60
+                checkInstallStatus "OSInstaller" "$pathToHelperApps/Install_12Segment.002.dmgpart"
+                if [[ $? != 0 ]]; then
+                    errorLog "OS Installer"
+                fi
+            fi
+        else
+            # if T2 can use Erase all Content and Settings
+            echo "Skipping OS Installer, Can use Erase all Content and Settings" >> $LPATH
+        fi
+    else
+            # if Apple Silicon can use Erase all Content and Settings
+            echo "Skipping OS Installer, Can use Erase all Content and Settings" >> $LPATH
+    fi
+fi
+
+# See if the error log exists, if not, create file confirming successful deployment
+if [ ! -e $errorPath ]; then
+    touch $donePath
+fi
+
+diskutil apfs updatePreboot /
+/usr/local/bin/jamf recon
+
+exit 0
